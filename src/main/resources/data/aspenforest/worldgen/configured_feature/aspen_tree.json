@@ -1,0 +1,6 @@
+{
+  "type": "aspenforest:aspen_tree",
+  "config": {
+    "with_floor": true
+  }
+}
