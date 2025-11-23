@@ -62,20 +62,40 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 		BlockState groundState = world.getBlockState(below);
 		
 		// Check if on valid ground
-		return groundState.isIn(BlockTags.DIRT) || 
-			   groundState.isOf(Blocks.GRASS_BLOCK) ||
-			   groundState.isOf(Blocks.PODZOL) ||
-			   groundState.isOf(Blocks.ROOTED_DIRT);
+		if (!groundState.isIn(BlockTags.DIRT) && 
+			!groundState.isOf(Blocks.GRASS_BLOCK) &&
+			!groundState.isOf(Blocks.PODZOL) &&
+			!groundState.isOf(Blocks.ROOTED_DIRT)) {
+			return false;
+		}
+		
+		// Check for structures nearby (5 block radius)
+		if (isNearStructure(world, pos)) {
+			return false;
+		}
+		
+		return true;
 	}
 	
 	private void generateTrunk(StructureWorldAccess world, BlockPos pos, int height) {
 		BlockState log = Blocks.BIRCH_LOG.getDefaultState().with(PillarBlock.AXIS, Direction.Axis.Y);
 		
-		for (int i = 0; i < height; i++) {
+		// Start one block down to replace the ground block
+		for (int i = -1; i < height; i++) {
 			BlockPos trunkPos = pos.up(i);
-			if (world.getBlockState(trunkPos).isReplaceable() || 
-				world.getBlockState(trunkPos).isIn(BlockTags.LEAVES)) {
-				world.setBlockState(trunkPos, log, 3);
+			BlockState currentState = world.getBlockState(trunkPos);
+			
+			// Replace ground block, air, and leaves
+			if (i == -1) {
+				// Replace the ground block itself
+				if (currentState.isIn(BlockTags.DIRT) || currentState.isOf(Blocks.GRASS_BLOCK)) {
+					world.setBlockState(trunkPos, log, 3);
+				}
+			} else {
+				// Replace air and leaves above ground
+				if (currentState.isReplaceable() || currentState.isIn(BlockTags.LEAVES)) {
+					world.setBlockState(trunkPos, log, 3);
+				}
 			}
 		}
 	}
@@ -192,6 +212,9 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 		
 		// Add decorative elements on top of ground blocks
 		addDecorations(world, groundPositions, random);
+		
+		// Add fallen leaves in a larger radius
+		addFallenLeaves(world, treeBase, random);
 	}
 	
 	private boolean placeRootBlock(StructureWorldAccess world, BlockPos pos, Random random, 
@@ -221,8 +244,8 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 			// 10% chance for coarse dirt
 			blockToPlace = Blocks.COARSE_DIRT.getDefaultState();
 		} else if (roll < AspenForestMod.CONFIG.rootedDirtChance + AspenForestMod.CONFIG.podzolChance + 0.15) {
-			// 5% chance for dirt path
-			blockToPlace = Blocks.DIRT_PATH.getDefaultState();
+			// 5% chance for extra podzol (was dirt path, but that blocks spreading)
+			blockToPlace = Blocks.PODZOL.getDefaultState();
 		} else {
 			// Keep as grass or existing block
 			return false;
@@ -290,6 +313,7 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 	}
 	
 	private void addDecorations(StructureWorldAccess world, Set<BlockPos> groundPositions, Random random) {
+		// Add decorations on ground blocks
 		for (BlockPos groundPos : groundPositions) {
 			BlockPos above = groundPos.up();
 			
@@ -298,15 +322,127 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 				continue;
 			}
 			
-			// 15% chance for dead bush (leaf litter)
-			if (random.nextDouble() < 0.15) {
+			double roll = random.nextDouble();
+			
+			// 10% chance for dead bush
+			if (roll < 0.10) {
 				world.setBlockState(above, Blocks.DEAD_BUSH.getDefaultState(), 3);
 			}
-			// 5% chance for brown mushroom
-			else if (random.nextDouble() < 0.05) {
+			// 3% chance for brown mushroom
+			else if (roll < 0.13) {
 				world.setBlockState(above, Blocks.BROWN_MUSHROOM.getDefaultState(), 3);
 			}
+			// 1% chance for red mushroom
+			else if (roll < 0.14) {
+				world.setBlockState(above, Blocks.RED_MUSHROOM.getDefaultState(), 3);
+			}
+			// 0.5% chance for flowering azalea (firefly bush substitute)
+			else if (roll < 0.145) {
+				world.setBlockState(above, Blocks.FLOWERING_AZALEA.getDefaultState(), 3);
+			}
 		}
+	}
+	
+	private void addFallenLeaves(StructureWorldAccess world, BlockPos treeBase, Random random) {
+		// Add fallen leaves in a radius slightly larger than terrain generation
+		int leafRadius = AspenForestMod.CONFIG.rootNetworkRadius + 2; // 6 blocks for default config
+		
+		for (int x = -leafRadius; x <= leafRadius; x++) {
+			for (int z = -leafRadius; z <= leafRadius; z++) {
+				double distance = Math.sqrt(x * x + z * z);
+				if (distance <= leafRadius) {
+					BlockPos checkPos = treeBase.add(x, 0, z);
+					BlockPos groundPos = findGroundLevel(world, checkPos);
+					
+					if (groundPos == null) continue;
+					
+					BlockPos above = groundPos.up();
+					BlockState aboveState = world.getBlockState(above);
+					
+					// Only place on air, with decreasing probability by distance
+					if (aboveState.isAir()) {
+						double placementChance = 0.15 * (1.0 - (distance / leafRadius) * 0.5);
+						if (random.nextDouble() < placementChance) {
+							// Use brown carpet as fallen leaves
+							world.setBlockState(above, Blocks.BROWN_CARPET.getDefaultState(), 3);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	private boolean isNearStructure(StructureWorldAccess world, BlockPos pos) {
+		// Check in a 5-block radius for non-natural blocks that indicate structures
+		int radius = 5;
+		for (int x = -radius; x <= radius; x++) {
+			for (int z = -radius; z <= radius; z++) {
+				// Check from ground level up a few blocks
+				for (int y = -1; y <= 3; y++) {
+					BlockPos checkPos = pos.add(x, y, z);
+					BlockState state = world.getBlockState(checkPos);
+					
+					// Skip air, natural blocks, and our own aspen trees
+					if (state.isAir() || state.isOf(Blocks.BIRCH_LOG) || 
+						state.isOf(Blocks.BIRCH_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
+						continue;
+					}
+					
+					// Check if this is a crafted/structure block
+					if (isStructureBlock(state)) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+	
+	private boolean isStructureBlock(BlockState state) {
+		// Natural blocks that are allowed
+		if (state.isIn(BlockTags.DIRT) ||
+			state.isIn(BlockTags.LOGS) ||
+			state.isIn(BlockTags.LEAVES) ||
+			state.isIn(BlockTags.FLOWERS) ||
+			state.isIn(BlockTags.SMALL_FLOWERS) ||
+			state.isOf(Blocks.STONE) ||
+			state.isOf(Blocks.DEEPSLATE) ||
+			state.isOf(Blocks.GRAVEL) ||
+			state.isOf(Blocks.SAND) ||
+			state.isOf(Blocks.SANDSTONE) ||
+			state.isOf(Blocks.GRASS_BLOCK) ||
+			state.isOf(Blocks.TALL_GRASS) ||
+			state.isOf(Blocks.SHORT_GRASS) ||
+			state.isOf(Blocks.FERN) ||
+			state.isOf(Blocks.LARGE_FERN) ||
+			state.isOf(Blocks.DEAD_BUSH) ||
+			state.isOf(Blocks.BROWN_MUSHROOM) ||
+			state.isOf(Blocks.RED_MUSHROOM) ||
+			state.isOf(Blocks.HANGING_ROOTS) ||
+			state.isOf(Blocks.ROOTED_DIRT) ||
+			state.isOf(Blocks.DANDELION) ||
+			state.isOf(Blocks.POPPY) ||
+			state.isOf(Blocks.AZURE_BLUET) ||
+			state.isOf(Blocks.CORNFLOWER) ||
+			state.isOf(Blocks.LILY_OF_THE_VALLEY) ||
+			state.isOf(Blocks.OXEYE_DAISY) ||
+			state.isOf(Blocks.SUNFLOWER) ||
+			state.isOf(Blocks.LILAC) ||
+			state.isOf(Blocks.ROSE_BUSH) ||
+			state.isOf(Blocks.PEONY) ||
+			state.isOf(Blocks.ANDESITE) ||
+			state.isOf(Blocks.DIORITE) ||
+			state.isOf(Blocks.GRANITE) ||
+			state.isOf(Blocks.CALCITE) ||
+			state.isOf(Blocks.TUFF) ||
+			state.isOf(Blocks.MOSS_BLOCK) ||
+			state.isOf(Blocks.MOSS_CARPET)) {
+			return false;
+		}
+		
+		// Everything else is considered a structure block
+		// This includes: planks, cobblestone, bricks, glass, doors, chests, etc.
+		return true;
 	}
 	
 	public static class AspenTreeConfig implements net.minecraft.world.gen.feature.FeatureConfig {

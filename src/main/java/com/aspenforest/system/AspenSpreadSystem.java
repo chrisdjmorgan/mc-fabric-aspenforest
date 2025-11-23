@@ -19,6 +19,7 @@ public class AspenSpreadSystem {
 	
 	private static class SpreadTracker {
 		long lastCheckTick = 0;
+		long lastRescanTick = 0; // Track when we last did a full rescan
 		final Set<BlockPos> aspenTrees = new HashSet<>();
 		final Queue<BlockPos> pendingSpreadAttempts = new LinkedList<>();
 		int attemptsThisTick = 0;
@@ -54,6 +55,17 @@ public class AspenSpreadSystem {
 		// Check if it's time for a new spread check cycle
 		if (currentTick - tracker.lastCheckTick >= AspenForestMod.CONFIG.spreadCheckInterval) {
 			tracker.lastCheckTick = currentTick;
+			
+			// Periodic rescan every 5 minutes (6000 ticks) to clear unloaded trees and find new ones
+			if (currentTick - tracker.lastRescanTick >= 6000) {
+				tracker.lastRescanTick = currentTick;
+				AspenForestMod.LOGGER.info("Performing periodic rescan - clearing {} old tree entries", tracker.aspenTrees.size());
+				tracker.aspenTrees.clear();
+				tracker.pendingSpreadAttempts.clear();
+				if (!world.getPlayers().isEmpty()) {
+					performInitialScan(world, tracker);
+				}
+			}
 			
 			// If we still have no trees, try scanning again
 			if (tracker.aspenTrees.isEmpty() && !world.getPlayers().isEmpty()) {
@@ -153,9 +165,13 @@ public class AspenSpreadSystem {
 		// Count how many trees are nearby the SOURCE tree
 		int sourceNearbyCount = countNearbyAspens(world, treePos, tracker);
 		
-		// Find a random position to spread to
-		int distance = AspenForestMod.CONFIG.minSpreadDistance + 
-			random.nextInt(AspenForestMod.CONFIG.maxSpreadDistance - AspenForestMod.CONFIG.minSpreadDistance + 1);
+		// Find a random position to spread to with weighted distribution toward middle values
+		// Use triangular distribution: pick two random values and average them
+		// This clusters results toward the center (4-5 blocks for range 3-8)
+		int range = AspenForestMod.CONFIG.maxSpreadDistance - AspenForestMod.CONFIG.minSpreadDistance + 1;
+		int distance1 = AspenForestMod.CONFIG.minSpreadDistance + random.nextInt(range);
+		int distance2 = AspenForestMod.CONFIG.minSpreadDistance + random.nextInt(range);
+		int distance = (distance1 + distance2) / 2; // Average creates bell curve
 		
 		double angle = random.nextDouble() * Math.PI * 2;
 		int offsetX = (int) (Math.cos(angle) * distance);
@@ -166,23 +182,55 @@ public class AspenSpreadSystem {
 		// Find the surface at the target position
 		targetPos = world.getTopPosition(net.minecraft.world.Heightmap.Type.WORLD_SURFACE_WG, targetPos);
 		
+		// Validate the position is within world bounds and not void
+		if (targetPos.getY() < world.getBottomY() || targetPos.getY() > world.getTopY()) {
+			return; // Position outside world bounds
+		}
+		
+		// Check distance to source tree with actual positions (accounting for elevation)
+		double actualDistanceToSource = Math.sqrt(
+			Math.pow(targetPos.getX() - treePos.getX(), 2) + 
+			Math.pow(targetPos.getZ() - treePos.getZ(), 2)
+		);
+		if (actualDistanceToSource < AspenForestMod.CONFIG.minSpreadDistance) {
+			return; // Too close to source tree after finding actual surface position
+		}
+		
+		// Early check: make sure no existing tree is very close (before expensive checks)
+		int minDistanceSq = AspenForestMod.CONFIG.minSpreadDistance * AspenForestMod.CONFIG.minSpreadDistance;
+		for (BlockPos aspenPos : tracker.aspenTrees) {
+			// Use 2D distance (ignore Y) to check horizontal spacing
+			double distanceSq = Math.pow(aspenPos.getX() - targetPos.getX(), 2) + 
+			                    Math.pow(aspenPos.getZ() - targetPos.getZ(), 2);
+			if (distanceSq < minDistanceSq) {
+				return; // Too close to an existing tree
+			}
+		}
+		
 		// Check elevation change - don't spread up steep cliffs (max 4 block difference)
 		int elevationDiff = Math.abs(targetPos.getY() - treePos.getY());
 		if (elevationDiff > 4) {
+			AspenForestMod.LOGGER.info("Spread blocked at {} - elevation diff: {}", targetPos, elevationDiff);
 			return; // Too steep
 		}
 		
 		// Check for water nearby - avoid spreading right next to water
 		if (isNearWater(world, targetPos)) {
+			AspenForestMod.LOGGER.info("Spread blocked at {} - near water", targetPos);
 			return;
 		}
 		
-		// Check if there's already a tree very close to this spot (within 3 blocks)
-		for (BlockPos aspenPos : tracker.aspenTrees) {
-			double distanceSq = aspenPos.getSquaredDistance(targetPos);
-			if (distanceSq < 9) { // 3 blocks squared
-				return; // Too close to an existing tree
-			}
+		// Check if target location has valid dirt-type ground for spreading
+		BlockPos groundPos = targetPos.down();
+		BlockState groundState = world.getBlockState(groundPos);
+		if (!isValidSpreadGround(groundState)) {
+			AspenForestMod.LOGGER.info("Spread blocked at {} - invalid ground: {}", targetPos, groundState.getBlock().getName().getString());
+			return; // Can't spread to non-dirt blocks like gravel, paths, farmland, etc.
+		}
+		
+		// Check for structures/buildings nearby - avoid spreading near non-natural blocks
+		if (isNearStructure(world, targetPos)) {
+			return; // Avoid villages, player structures, etc.
 		}
 		
 		// Check density at the TARGET location
@@ -258,6 +306,17 @@ public class AspenSpreadSystem {
 		return false;
 	}
 	
+	private static boolean isValidSpreadGround(BlockState state) {
+		// Only allow spreading to natural dirt variants
+		// Include: DIRT, GRASS_BLOCK, PODZOL, COARSE_DIRT, ROOTED_DIRT
+		// Exclude: GRAVEL, DIRT_PATH, FARMLAND, and any other non-dirt blocks
+		return state.isOf(Blocks.DIRT) || 
+		       state.isOf(Blocks.GRASS_BLOCK) ||
+		       state.isOf(Blocks.PODZOL) ||
+		       state.isOf(Blocks.COARSE_DIRT) ||
+		       state.isOf(Blocks.ROOTED_DIRT);
+	}
+	
 	private static boolean isNearWater(ServerWorld world, BlockPos pos) {
 		// Check in a 3-block radius for water
 		for (int x = -3; x <= 3; x++) {
@@ -275,9 +334,85 @@ public class AspenSpreadSystem {
 		return false;
 	}
 	
+	private static boolean isNearStructure(ServerWorld world, BlockPos pos) {
+		// Check in a 5-block radius for non-natural blocks that indicate structures
+		int radius = 5;
+		for (int x = -radius; x <= radius; x++) {
+			for (int z = -radius; z <= radius; z++) {
+				// Check from ground level up a few blocks
+				for (int y = -1; y <= 3; y++) {
+					BlockPos checkPos = pos.add(x, y, z);
+					BlockState state = world.getBlockState(checkPos);
+					
+					// Skip air, natural blocks, and our own aspen trees
+					if (state.isAir() || state.isOf(Blocks.BIRCH_LOG) || 
+						state.isOf(Blocks.BIRCH_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
+						continue;
+					}
+					
+					// Check if this is a crafted/structure block
+					if (isStructureBlock(state)) {
+						AspenForestMod.LOGGER.info("Spread blocked at {} - found structure block: {} at {}", 
+							pos, state.getBlock().getName().getString(), checkPos);
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+	
+	private static boolean isStructureBlock(BlockState state) {
+		// Natural blocks that are allowed
+		if (state.isIn(net.minecraft.registry.tag.BlockTags.DIRT) ||
+			state.isIn(net.minecraft.registry.tag.BlockTags.LOGS) ||
+			state.isIn(net.minecraft.registry.tag.BlockTags.LEAVES) ||
+			state.isIn(net.minecraft.registry.tag.BlockTags.FLOWERS) ||
+			state.isIn(net.minecraft.registry.tag.BlockTags.SMALL_FLOWERS) ||
+			state.isOf(Blocks.STONE) ||
+			state.isOf(Blocks.DEEPSLATE) ||
+			state.isOf(Blocks.GRAVEL) ||
+			state.isOf(Blocks.SAND) ||
+			state.isOf(Blocks.SANDSTONE) ||
+			state.isOf(Blocks.GRASS_BLOCK) ||
+			state.isOf(Blocks.TALL_GRASS) ||
+			state.isOf(Blocks.SHORT_GRASS) ||
+			state.isOf(Blocks.FERN) ||
+			state.isOf(Blocks.LARGE_FERN) ||
+			state.isOf(Blocks.DEAD_BUSH) ||
+			state.isOf(Blocks.BROWN_MUSHROOM) ||
+			state.isOf(Blocks.RED_MUSHROOM) ||
+			state.isOf(Blocks.HANGING_ROOTS) ||
+			state.isOf(Blocks.ROOTED_DIRT) ||
+			state.isOf(Blocks.DANDELION) ||
+			state.isOf(Blocks.POPPY) ||
+			state.isOf(Blocks.AZURE_BLUET) ||
+			state.isOf(Blocks.CORNFLOWER) ||
+			state.isOf(Blocks.LILY_OF_THE_VALLEY) ||
+			state.isOf(Blocks.OXEYE_DAISY) ||
+			state.isOf(Blocks.SUNFLOWER) ||
+			state.isOf(Blocks.LILAC) ||
+			state.isOf(Blocks.ROSE_BUSH) ||
+			state.isOf(Blocks.PEONY) ||
+			state.isOf(Blocks.ANDESITE) ||
+			state.isOf(Blocks.DIORITE) ||
+			state.isOf(Blocks.GRANITE) ||
+			state.isOf(Blocks.CALCITE) ||
+			state.isOf(Blocks.TUFF) ||
+			state.isOf(Blocks.MOSS_BLOCK) ||
+			state.isOf(Blocks.MOSS_CARPET)) {
+			return false;
+		}
+		
+		// Everything else is considered a structure block
+		// This includes: planks, cobblestone, bricks, glass, doors, chests, etc.
+		return true;
+	}
+	
 	public static void registerAspenTree(ServerWorld world, BlockPos pos) {
 		SpreadTracker tracker = worldTrackers.computeIfAbsent(world, w -> new SpreadTracker());
 		tracker.aspenTrees.add(pos);
+		AspenForestMod.LOGGER.info("Registered aspen tree at {} - total trees: {}", pos, tracker.aspenTrees.size());
 	}
 	
 	public static void forceScan(ServerWorld world) {
