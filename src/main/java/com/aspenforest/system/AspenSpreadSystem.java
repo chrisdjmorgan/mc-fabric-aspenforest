@@ -400,7 +400,10 @@ public class AspenSpreadSystem {
 			state.isOf(Blocks.CALCITE) ||
 			state.isOf(Blocks.TUFF) ||
 			state.isOf(Blocks.MOSS_BLOCK) ||
-			state.isOf(Blocks.MOSS_CARPET)) {
+			state.isOf(Blocks.MOSS_CARPET) ||
+			state.isOf(Blocks.BROWN_CARPET) ||
+			state.isOf(Blocks.FLOWERING_AZALEA) ||
+			state.isOf(Blocks.AZALEA)) {
 			return false;
 		}
 		

@@ -110,13 +110,13 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 			BlockPos layerCenter = start.up(y);
 			int radius;
 			
-			// Shape the canopy - wider in middle, narrower at top and bottom
+		
 			if (y == 0) {
 				radius = 2;
 			} else if (y == canopyHeight - 1) {
 				radius = 1;
 			} else {
-				radius = 3;
+				radius = 2;
 			}
 			
 			for (int x = -radius; x <= radius; x++) {
@@ -126,6 +126,7 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 					double distance = Math.sqrt(x * x + z * z);
 					if (distance <= radius) {
 						BlockPos leafPos = layerCenter.add(x, 0, z);
+
 						
 						// Add some randomness to leaf placement for natural look
 						if (distance < radius || random.nextFloat() < 0.7) {
@@ -435,12 +436,13 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 			state.isOf(Blocks.GRANITE) ||
 			state.isOf(Blocks.CALCITE) ||
 			state.isOf(Blocks.TUFF) ||
-			state.isOf(Blocks.MOSS_BLOCK) ||
-			state.isOf(Blocks.MOSS_CARPET)) {
-			return false;
-		}
-		
-		// Everything else is considered a structure block
+				state.isOf(Blocks.MOSS_BLOCK) ||
+				state.isOf(Blocks.MOSS_CARPET) ||
+				state.isOf(Blocks.BROWN_CARPET) ||
+				state.isOf(Blocks.FLOWERING_AZALEA) ||
+				state.isOf(Blocks.AZALEA)) {
+				return false;
+			}		// Everything else is considered a structure block
 		// This includes: planks, cobblestone, bricks, glass, doors, chests, etc.
 		return true;
 	}
