@@ -20,7 +20,7 @@ public class AspenForestConfig {
 	public double spreadChance = 0.15; // 15% chance per check
 	public int minSpreadDistance = 3;
 	public int maxSpreadDistance = 8;
-	public int maxNearbyAspens = 12; // Max aspens in 32 block radius before stopping spread
+	public int maxNearbyAspens = 11; // Max aspens in 32 block radius before stopping spread
 	
 	// Floor Generation
 	public int strippedLogRadius = 1; // Stripped birch around trunk base
@@ -29,9 +29,19 @@ public class AspenForestConfig {
 	public double podzolChance = 0.25;
 	public double hangingRootsChance = 0.15;
 	
+	// Decoration Weights (as percentages)
+	public double deadBushChance = 0.001; // 0.5%
+	public double brownMushroomChance = 0.01; // 3%
+	public double redMushroomChance = 0.003; // 1%
+	public double pinkPetalsChance = 0.005; // 0.5%
+	public double fireflyChance = 0.01; // 0.5%
+	public double fallenLeavesChance = 0.25; // 15% base chance
+	
 	// Biome Restrictions
 	public boolean limitToPlainsOnly = true;
 	public int plainsCheckRadius = 16; // Must be within this many blocks of plains
+	public int waterMargin = 8; // Minimum distance from water bodies
+	public int biomeEdgeMargin = 12; // Minimum distance from biome boundaries
 	
 	// Performance
 	public int maxSpreadAttemptsPerTick = 5; // Limit concurrent spread calculations

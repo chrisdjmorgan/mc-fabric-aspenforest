@@ -101,7 +101,8 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 	}
 	
 	private void generateCanopy(StructureWorldAccess world, BlockPos start, int treeHeight, Random random) {
-		BlockState leaves = Blocks.BIRCH_LEAVES.getDefaultState();
+		BlockState leaves = Blocks.AZALEA_LEAVES.getDefaultState();
+		BlockState log = Blocks.BIRCH_LOG.getDefaultState().with(PillarBlock.AXIS, Direction.Axis.Y);
 		
 		// Canopy starts 3 blocks from top and extends upward
 		int canopyHeight = 5;
@@ -119,9 +120,24 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 				radius = 2;
 			}
 			
+			// Place log at center to support leaves, except on the top layer
+			if (y < canopyHeight - 1) {
+				if (world.getBlockState(layerCenter).isReplaceable() || world.getBlockState(layerCenter).isIn(BlockTags.LEAVES)) {
+					world.setBlockState(layerCenter, log, 3);
+				}
+			}
+			
 			for (int x = -radius; x <= radius; x++) {
 				for (int z = -radius; z <= radius; z++) {
-					if (x == 0 && z == 0) continue; // Skip center (trunk)
+					if (x == 0 && z == 0) {
+						// On top layer, place leaves instead of log
+						if (y == canopyHeight - 1) {
+							if (world.getBlockState(layerCenter).isReplaceable()) {
+								world.setBlockState(layerCenter, leaves, 3);
+							}
+						}
+						continue; // Skip center (already placed log or leaves)
+					}
 					
 					double distance = Math.sqrt(x * x + z * z);
 					if (distance <= radius) {
@@ -324,22 +340,40 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 			}
 			
 			double roll = random.nextDouble();
+			double cumulative = 0.0;
 			
-			// 10% chance for dead bush
-			if (roll < 0.10) {
+			// Dead bush
+			cumulative += AspenForestMod.CONFIG.deadBushChance;
+			if (roll < cumulative) {
 				world.setBlockState(above, Blocks.DEAD_BUSH.getDefaultState(), 3);
+				continue;
 			}
-			// 3% chance for brown mushroom
-			else if (roll < 0.13) {
+			
+			// Brown mushroom
+			cumulative += AspenForestMod.CONFIG.brownMushroomChance;
+			if (roll < cumulative) {
 				world.setBlockState(above, Blocks.BROWN_MUSHROOM.getDefaultState(), 3);
+				continue;
 			}
-			// 1% chance for red mushroom
-			else if (roll < 0.14) {
+			
+			// Red mushroom
+			cumulative += AspenForestMod.CONFIG.redMushroomChance;
+			if (roll < cumulative) {
 				world.setBlockState(above, Blocks.RED_MUSHROOM.getDefaultState(), 3);
+				continue;
 			}
-			// 0.5% chance for flowering azalea (firefly bush substitute)
-			else if (roll < 0.145) {
-				world.setBlockState(above, Blocks.FLOWERING_AZALEA.getDefaultState(), 3);
+			
+			// Pink petals
+			cumulative += AspenForestMod.CONFIG.pinkPetalsChance;
+			if (roll < cumulative) {
+				world.setBlockState(above, Blocks.PINK_PETALS.getDefaultState(), 3);
+				continue;
+			}
+			
+			// Fireflies
+			cumulative += AspenForestMod.CONFIG.fireflyChance;
+			if (roll < cumulative) {
+				world.setBlockState(above, Blocks.FIREFLY_BUSH.getDefaultState(), 3);
 			}
 		}
 	}
@@ -360,14 +394,14 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 					BlockPos above = groundPos.up();
 					BlockState aboveState = world.getBlockState(above);
 					
-					// Only place on air, with decreasing probability by distance
-					if (aboveState.isAir()) {
-						double placementChance = 0.15 * (1.0 - (distance / leafRadius) * 0.5);
-						if (random.nextDouble() < placementChance) {
-							// Use brown carpet as fallen leaves
-							world.setBlockState(above, Blocks.BROWN_CARPET.getDefaultState(), 3);
-						}
+				// Only place on air, with decreasing probability by distance
+				if (aboveState.isAir()) {
+					double placementChance = AspenForestMod.CONFIG.fallenLeavesChance * (1.0 - (distance / leafRadius) * 0.5);
+					if (random.nextDouble() < placementChance) {
+						// Place leaf litter
+						world.setBlockState(above, Blocks.LEAF_LITTER.getDefaultState(), 3);
 					}
+				}
 				}
 			}
 		}
@@ -385,7 +419,7 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 					
 					// Skip air, natural blocks, and our own aspen trees
 					if (state.isAir() || state.isOf(Blocks.BIRCH_LOG) || 
-						state.isOf(Blocks.BIRCH_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
+						state.isOf(Blocks.AZALEA_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
 						continue;
 					}
 					
@@ -436,12 +470,13 @@ public class AspenTreeFeature extends Feature<AspenTreeFeature.AspenTreeConfig> 
 			state.isOf(Blocks.GRANITE) ||
 			state.isOf(Blocks.CALCITE) ||
 			state.isOf(Blocks.TUFF) ||
-				state.isOf(Blocks.MOSS_BLOCK) ||
-				state.isOf(Blocks.MOSS_CARPET) ||
-				state.isOf(Blocks.BROWN_CARPET) ||
-				state.isOf(Blocks.FLOWERING_AZALEA) ||
-				state.isOf(Blocks.AZALEA)) {
-				return false;
+			state.isOf(Blocks.MOSS_BLOCK) ||
+			state.isOf(Blocks.MOSS_CARPET) ||
+			state.isOf(Blocks.LEAF_LITTER) ||
+			state.isOf(Blocks.PINK_PETALS) ||
+			state.isOf(Blocks.FIREFLY_BUSH) ||
+			state.isOf(Blocks.AZALEA)) {
+			return false;
 			}		// Everything else is considered a structure block
 		// This includes: planks, cobblestone, bricks, glass, doors, chests, etc.
 		return true;

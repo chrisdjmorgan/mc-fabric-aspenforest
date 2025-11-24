@@ -183,7 +183,7 @@ public class AspenSpreadSystem {
 		targetPos = world.getTopPosition(net.minecraft.world.Heightmap.Type.WORLD_SURFACE_WG, targetPos);
 		
 		// Validate the position is within world bounds and not void
-		if (targetPos.getY() < world.getBottomY() || targetPos.getY() > world.getTopY()) {
+		if (targetPos.getY() < world.getBottomY() || targetPos.getY() > world.getTopY(net.minecraft.world.Heightmap.Type.WORLD_SURFACE_WG, targetPos)) {
 			return; // Position outside world bounds
 		}
 		
@@ -217,6 +217,12 @@ public class AspenSpreadSystem {
 		// Check for water nearby - avoid spreading right next to water
 		if (isNearWater(world, targetPos)) {
 			AspenForestMod.LOGGER.info("Spread blocked at {} - near water", targetPos);
+			return;
+		}
+		
+		// Check for biome edges - avoid spreading near biome boundaries
+		if (isNearBiomeEdge(world, targetPos)) {
+			AspenForestMod.LOGGER.info("Spread blocked at {} - near biome edge", targetPos);
 			return;
 		}
 		
@@ -318,9 +324,10 @@ public class AspenSpreadSystem {
 	}
 	
 	private static boolean isNearWater(ServerWorld world, BlockPos pos) {
-		// Check in a 3-block radius for water
-		for (int x = -3; x <= 3; x++) {
-			for (int z = -3; z <= 3; z++) {
+		// Check in a configurable radius for water
+		int waterMargin = AspenForestMod.CONFIG.waterMargin;
+		for (int x = -waterMargin; x <= waterMargin; x++) {
+			for (int z = -waterMargin; z <= waterMargin; z++) {
 				BlockPos checkPos = pos.add(x, 0, z);
 				// Check this position and a few blocks down for water
 				for (int y = 0; y >= -3; y--) {
@@ -329,6 +336,26 @@ public class AspenSpreadSystem {
 						return true;
 					}
 				}
+			}
+		}
+		return false;
+	}
+	
+	private static boolean isNearBiomeEdge(ServerWorld world, BlockPos pos) {
+		// Check if we're near a biome boundary
+		int margin = AspenForestMod.CONFIG.biomeEdgeMargin;
+		String centerBiome = world.getBiome(pos).getKey().map(key -> key.getValue().getPath()).orElse("");
+		
+		// Sample biome at edges of margin area
+		for (int angle = 0; angle < 360; angle += 45) {
+			double radians = Math.toRadians(angle);
+			int x = (int)(Math.cos(radians) * margin);
+			int z = (int)(Math.sin(radians) * margin);
+			BlockPos checkPos = pos.add(x, 0, z);
+			String checkBiome = world.getBiome(checkPos).getKey().map(key -> key.getValue().getPath()).orElse("");
+			
+			if (!centerBiome.equals(checkBiome)) {
+				return true; // Different biome within margin distance
 			}
 		}
 		return false;
@@ -346,7 +373,7 @@ public class AspenSpreadSystem {
 					
 					// Skip air, natural blocks, and our own aspen trees
 					if (state.isAir() || state.isOf(Blocks.BIRCH_LOG) || 
-						state.isOf(Blocks.BIRCH_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
+						state.isOf(Blocks.AZALEA_LEAVES) || state.isOf(Blocks.STRIPPED_BIRCH_LOG)) {
 						continue;
 					}
 					
@@ -392,22 +419,16 @@ public class AspenSpreadSystem {
 			state.isOf(Blocks.OXEYE_DAISY) ||
 			state.isOf(Blocks.SUNFLOWER) ||
 			state.isOf(Blocks.LILAC) ||
-			state.isOf(Blocks.ROSE_BUSH) ||
-			state.isOf(Blocks.PEONY) ||
-			state.isOf(Blocks.ANDESITE) ||
-			state.isOf(Blocks.DIORITE) ||
-			state.isOf(Blocks.GRANITE) ||
-			state.isOf(Blocks.CALCITE) ||
-			state.isOf(Blocks.TUFF) ||
-			state.isOf(Blocks.MOSS_BLOCK) ||
-			state.isOf(Blocks.MOSS_CARPET) ||
-			state.isOf(Blocks.BROWN_CARPET) ||
-			state.isOf(Blocks.FLOWERING_AZALEA) ||
-			state.isOf(Blocks.AZALEA)) {
-			return false;
-		}
-		
-		// Everything else is considered a structure block
+		state.isOf(Blocks.ROSE_BUSH) ||
+		state.isOf(Blocks.PEONY) ||
+		state.isOf(Blocks.MOSS_BLOCK) ||
+		state.isOf(Blocks.MOSS_CARPET) ||
+		state.isOf(Blocks.LEAF_LITTER) ||
+		state.isOf(Blocks.PINK_PETALS) ||
+		state.isOf(Blocks.FIREFLY_BUSH) ||
+		state.isOf(Blocks.AZALEA)) {
+	return false;
+	}		// Everything else is considered a structure block
 		// This includes: planks, cobblestone, bricks, glass, doors, chests, etc.
 		return true;
 	}
